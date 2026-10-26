@@ -1,0 +1,66 @@
+name: Build LeviLauncher Native Mod
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # 🔥 STEP BARU: Memaksa folder config dibuat
+      - name: Ensure config directory exists
+        run: |
+          mkdir -p config
+          # Buat file dummy jika belum ada, agar CMake tidak rewel
+          [ -f config/config.json ] || echo "{}" > config/config.json
+          [ -f config/config.schema.json ] || echo "{}" > config/config.schema.json
+          echo "Isi folder config:"
+          ls -la config/
+
+      - name: Setup Android NDK r27d
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27d
+          add-to-path: false
+
+      - name: Export NDK path
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+      - name: Verify NDK
+        run: |
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            || { echo "::error::android.toolchain.cmake tidak ditemukan!"; exit 1; }
+          echo "NDK siap dipakai."
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-23 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G Ninja
+
+      - name: Build with Ninja
+        run: cmake --build build --config Release -j 2
+
+      - name: Upload .so artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-mod-libs
+          path: |
+            build/**/*.so
+            build/**/*.levipack
+          if-no-files-found: error
