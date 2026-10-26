@@ -1,0 +1,84 @@
+name: Build & Pack LeviLauncher Mod
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Android NDK r27d
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27d
+          add-to-path: false
+
+      - name: Export NDK path
+        run: echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-23 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G Ninja
+
+      - name: Build with Ninja
+        run: cmake --build build --config Release -j 2
+
+      - name: Auto-Pack to .levipack
+        run: |
+          # 1. Buat folder kerja
+          mkdir -p package/config
+          
+          # 2. Cari dan copy file .so hasil build (selain preloader)
+          echo "Mencari file .so..."
+          find build -name "libclange*.so" -exec cp {} package/ \;
+          find build -name "libmy_mod*.so" -exec cp {} package/ \;
+          
+          # 3. Ambil nama file .so yang barusan dicopy
+          SO_FILE=$(ls package/*.so | head -n 1 | xargs basename)
+          echo "File mod yang ditemukan: $SO_FILE"
+          
+          # 4. Buat manifest.json otomatis
+          cat <<EOF > package/manifest.json
+          {
+            "type": "preload-native",
+            "name": "CalmMod",
+            "author": "Developer",
+            "version": "1.0.0",
+            "entry": "$SO_FILE",
+            "minecraft_versions": [],
+            "overwrite_files": [],
+            "overwrite_folders": []
+          }
+          EOF
+          
+          # 5. Buat config dummy
+          echo "{}" > package/config/config.json
+          echo "{}" > package/config/config.schema.json
+          
+          # 6. Kemas jadi .levipack
+          cd package
+          zip -r ../CalmMod.levipack *
+          echo "Berhasil dikemas menjadi CalmMod.levipack!"
+
+      - name: Upload .levipack Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CalmMod-Final
+          path: CalmMod.levipack
+          if-no-files-found: error
